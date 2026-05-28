@@ -208,45 +208,25 @@ WorkspaceName: DataEngineering
 
 > **Why?** Microsoft Fabric's `mssparkutils.credentials.getToken` does not support the Graph API audience. The notebook uses MSAL with a service principal instead.
 
-### Step 1 — Create an App Registration
+### Automated setup (recommended)
+
+Run the included script — it handles everything in one go:
 
 ```powershell
-# Create app and service principal
-az ad app create --display-name "FabricWorkspaceAccessReport"
-az ad sp create --id <appId-from-above>
+# Prerequisites: az CLI installed, logged in as Global Admin or Privileged Role Admin
+.\setup-service-principal.ps1
 ```
 
-Or via the Azure Portal: **Entra ID → App registrations → New registration**
+The script will:
+1. Create an app registration named `FabricWorkspaceAccessReport`
+2. Create a service principal
+3. Create a client secret (valid 1 year)
+4. Grant `GroupMember.Read.All` with admin consent
+5. Print the three values to paste into the notebook
 
-### Step 2 — Create a Client Secret
+### Configure the Notebook
 
-```powershell
-az ad app credential reset --id <appId> --years 1
-# Save the returned password — it is shown only once
-```
-
-Or via the Portal: **App registration → Certificates & secrets → New client secret**
-
-### Step 3 — Grant `GroupMember.Read.All` (Application Permission)
-
-```powershell
-# Add the permission to the manifest
-az ad app permission add \
-  --id <appId> \
-  --api 00000003-0000-0000-c000-000000000000 \
-  --api-permissions 98830695-27a2-44f7-8c18-0c3ebc9698f6=Role
-
-# Grant admin consent
-az ad app permission admin-consent --id <appId>
-```
-
-Or via the Portal: **App registration → API permissions → Add a permission → Microsoft Graph → Application permissions → `GroupMember.Read.All` → Grant admin consent**
-
-> ⚠️ Admin consent must be granted by a **Global Administrator** or **Privileged Role Administrator**.
-
-### Step 4 — Configure the Notebook
-
-Set the three variables at the top of the first code cell:
+Set the three variables at the top of the first code cell using the output from the script:
 
 ```python
 SP_CLIENT_ID     = "<your-app-client-id>"
