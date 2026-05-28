@@ -90,7 +90,7 @@ The script will:
 - Create an app registration named `FabricWorkspaceAccessReport`
 - Create a service principal for it
 - Generate a client secret (valid 1 year)
-- Grant `GroupMember.Read.All` with admin consent (needed to read group members)
+- Grant `GroupMember.Read.All` and `User.Read.All` with admin consent
 - Print the three values you need for the next step
 
 Output looks like:
@@ -182,7 +182,7 @@ spark.sql("""
 | What | Where | Permission needed |
 |---|---|---|
 | Read workspaces and roles | Fabric API | At least Viewer on each workspace (or Fabric Admin for all) |
-| Expand group members | Microsoft Graph | `GroupMember.Read.All` (granted by `setup-service-principal.ps1`) |
+| Expand group members | Microsoft Graph | `GroupMember.Read.All` + `User.Read.All` (granted by `setup-service-principal.ps1`) |
 
 ---
 
