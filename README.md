@@ -198,9 +198,81 @@ WorkspaceName: DataEngineering
 - Authenticated via `az login` (PowerShell) or `notebookutils.credentials.getToken("pbi")` (Notebook)
 
 ### Microsoft Graph API
-- `Group.Read.All` (Application) or `GroupMember.Read.All` (Delegated)
+- `GroupMember.Read.All` (Application permission, admin consent required)
 - Required for security group member expansion
-- Authenticated via `az login` (PowerShell) or `notebookutils.credentials.getToken("https://graph.microsoft.com")` (Notebook)
+- Authenticated via `az login` (PowerShell) or service principal / MSAL (Notebook)
+
+---
+
+## Service Principal Setup (Notebook)
+
+> **Why?** Microsoft Fabric's `mssparkutils.credentials.getToken` does not support the Graph API audience. The notebook uses MSAL with a service principal instead.
+
+### Step 1 — Create an App Registration
+
+```powershell
+# Create app and service principal
+az ad app create --display-name "FabricWorkspaceAccessReport"
+az ad sp create --id <appId-from-above>
+```
+
+Or via the Azure Portal: **Entra ID → App registrations → New registration**
+
+### Step 2 — Create a Client Secret
+
+```powershell
+az ad app credential reset --id <appId> --years 1
+# Save the returned password — it is shown only once
+```
+
+Or via the Portal: **App registration → Certificates & secrets → New client secret**
+
+### Step 3 — Grant `GroupMember.Read.All` (Application Permission)
+
+```powershell
+# Add the permission to the manifest
+az ad app permission add \
+  --id <appId> \
+  --api 00000003-0000-0000-c000-000000000000 \
+  --api-permissions 98830695-27a2-44f7-8c18-0c3ebc9698f6=Role
+
+# Grant admin consent
+az ad app permission admin-consent --id <appId>
+```
+
+Or via the Portal: **App registration → API permissions → Add a permission → Microsoft Graph → Application permissions → `GroupMember.Read.All` → Grant admin consent**
+
+> ⚠️ Admin consent must be granted by a **Global Administrator** or **Privileged Role Administrator**.
+
+### Step 4 — Configure the Notebook
+
+Set the three variables at the top of the first code cell:
+
+```python
+SP_CLIENT_ID     = "<your-app-client-id>"
+SP_CLIENT_SECRET = "<your-client-secret>"   # store securely — do not commit!
+SP_TENANT_ID     = "<your-tenant-id>"
+```
+
+**Recommended:** inject these at runtime via Fabric Pipeline parameters instead of hardcoding:
+
+```python
+SP_CLIENT_ID     = notebookutils.widgets.get("sp_client_id")
+SP_CLIENT_SECRET = notebookutils.widgets.get("sp_client_secret")
+SP_TENANT_ID     = notebookutils.widgets.get("sp_tenant_id")
+```
+
+Or retrieve them from **Azure Key Vault** using a Fabric linked service:
+
+```python
+SP_CLIENT_SECRET = notebookutils.credentials.getSecretWithLS("your-kv-name", "sp-client-secret")
+```
+
+### Required Permissions Summary
+
+| Permission | Type | Why needed |
+|---|---|---|
+| `GroupMember.Read.All` | Application | Read members of Entra security groups |
 
 ## Troubleshooting
 
