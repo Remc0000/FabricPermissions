@@ -1,292 +1,191 @@
 # Fabric Permissions Tracker
 
-Automated tracking of Microsoft Fabric workspace access permissions with expension off the groups, so you will know all the users!
+Ever wondered who **exactly** has access to your Microsoft Fabric workspaces? Fabric shows you which users and groups are assigned, but not who is inside those groups. This repo solves that — it expands every group to individual users so you always have a complete picture.
 
-In Fabric you can see which users and groups have permissions to a workspace, but how do you know who is in a certain group?
-Run this powershell script and you will know! It will create a HTML & CSV file with the same content to show you exactly this. Who has what privileges via which group.
-If you import the notebook, attach a lakehouse and run it every day, then you will see exactly the same, but you can also see when someone don't have access anymore and since when.
+Two tools are included depending on your use case:
 
-
-
-## Overview
-
-This repository contains tools to monitor and track access permissions across all Microsoft Fabric workspaces. It captures daily snapshots of who has access to what, detects when access is granted or revoked, and maintains a complete historical audit trail.
-
-**Key Features:**
-- 📊 **Complete Workspace Coverage** - Scans all accessible Fabric workspaces
-- 👥 **Security Group Expansion** - Automatically expands Azure AD/Entra security groups to individual members
-- 📅 **Temporal Tracking** - Records `granted_on_dt` and `revoked_on_dt` for every access record
-- 🔍 **Change Detection** - Identifies new access, continuing access, and removed access
-- 💾 **Historical Audit Trail** - Preserves complete access history in Delta Lake format
-- ⚡ **Two Deployment Options** - PowerShell script or Fabric Notebook
-
-## Tools
-
-### 1. PowerShell Script (`get-fabric-workspace-access.ps1`)
-
-**Use Case:** One-time reports, ad-hoc analysis, local execution
-
-**Features:**
-- Retrieves all workspace access permissions
-- Expands security group memberships
-- Outputs to console (CSV/JSON export optional)
-- No temporal tracking (snapshot only)
-
-**Prerequisites:**
-- PowerShell 7+
-- Azure CLI (`az login` completed)
-- Fabric API permissions
-
-**Usage:**
-```powershell
-# Run the script
-.\get-fabric-workspace-access.ps1
-
-# Output shows workspace name, user, role, and whether from security group expansion
-```
+| Tool | Best for |
+|---|---|
+| `get-fabric-workspace-access.ps1` | One-off report, no setup required |
+| `WorkspaceAccessReport.ipynb` | Daily automated tracking with full history |
 
 ---
 
-### 2. Fabric Notebook (`WorkspaceAccessReport.ipynb`)
+## PowerShell Script
 
-**Use Case:** Daily automated execution with historical tracking
+### What it does
 
-**Features:**
-- Runs daily via Fabric Data Pipeline (scheduled)
-- Tracks access over time with granted/revoked dates
-- Stores results in Delta Lake table (`workspace_access_report`)
-- Preserves historical records with `is_active` flag
-- Summary statistics and visualization
+Run it locally and it will:
+
+1. Connect to your Fabric tenant using your existing Azure CLI login
+2. Retrieve every workspace you have access to
+3. For each workspace, pull all role assignments (Admin, Member, Contributor, Viewer)
+4. Expand any Entra security groups to their individual members via the Graph API
+5. Generate two output files:
+   - `workspace-access-report-<timestamp>.html` — a styled report you can open in any browser
+   - `workspace-access-report-<timestamp>.csv` — a flat file for Excel or further analysis
+
+### How to run it
 
 **Prerequisites:**
-- Microsoft Fabric workspace
-- Lakehouse attached to notebook (for Delta table storage)
-- Graph API permissions for group member reads
-- Fabric API access token
+- PowerShell 7+
+- Azure CLI (`az`) installed and logged in (`az login`)
 
-**Schema:**
-| Field | Type | Description |
-|-------|------|-------------|
-| `WorkspaceId` | string | Fabric workspace GUID |
-| `WorkspaceName` | string | Workspace display name |
-| `PrincipalId` | string | User or group object ID |
-| `PrincipalName` | string | User principal name or group name |
-| `PrincipalType` | string | `User` or `Group` |
-| `Role` | string | `Admin`, `Member`, `Contributor`, `Viewer` |
-| `FromGroupExpansion` | boolean | True if derived from security group membership |
-| `SourceGroupId` | string | Parent group ID (if `FromGroupExpansion = true`) |
-| `SourceGroupName` | string | Parent group name |
-| `granted_on_dt` | date | Date access was first detected |
-| `revoked_on_dt` | date | Date access was removed (null if active) |
-| `is_active` | boolean | True if access currently exists |
-| `snapshot_date` | date | Date of this snapshot |
+```powershell
+# Run from the repo directory
+.\get-fabric-workspace-access.ps1
 
-**Setup:**
+# Or specify an output directory
+.\get-fabric-workspace-access.ps1 -OutputDirectory "C:\Reports"
+```
 
-1. **Upload to Fabric:**
-   - Upload `WorkspaceAccessReport.ipynb` to your Fabric workspace
-   - Or use the Fabric REST API with the notebook definition
+The script automatically opens the browser for login if you are not yet authenticated. When it finishes it prints the paths to both output files.
 
-2. **Attach Lakehouse:**
-   - Open the notebook in Fabric portal
-   - Click "Add Lakehouse" → select or create a lakehouse
-   - Set as default lakehouse
+---
 
-3. **First Run:**
-   - Execute all cells
-   - Creates `workspace_access_report` Delta table
-   - Populates initial baseline with `granted_on_dt = today`
+## Fabric Notebook
 
-4. **Schedule (Optional):**
-   - Create a Fabric Data Pipeline
-   - Add a Notebook activity pointing to `WorkspaceAccessReport`
-   - Set schedule trigger (recommended: daily at 2 AM)
+### What it does
 
-**Usage:**
+The notebook does everything the PowerShell script does, but runs inside Fabric on a schedule. It:
+
+1. Retrieves all workspace role assignments and expands group memberships
+2. Compares today's snapshot against the previous run to detect changes
+3. Marks new access with a `granted_on_dt` date
+4. Marks removed access with a `revoked_on_dt` date
+5. Appends all records to a Delta Lake table (`workspace_access_report`) in your lakehouse
+
+Run it daily and you will have a full audit trail of who got access when, and when they lost it.
+
+**Delta table schema:**
+
+| Column | Description |
+|---|---|
+| `WorkspaceId` | Fabric workspace GUID |
+| `WorkspaceName` | Workspace display name |
+| `PrincipalType` | `User` or group-expanded `User` |
+| `PrincipalId` | Entra object ID |
+| `UserPrincipalName` | UPN of the user |
+| `PrincipalDisplayName` | Display name |
+| `Role` | `Admin`, `Member`, `Contributor`, or `Viewer` |
+| `GroupName` | Source group name (if access comes via a group) |
+| `GroupId` | Source group ID |
+| `granted_on_dt` | Date access was first detected |
+| `revoked_on_dt` | Date access was removed (`null` if still active) |
+| `snapshot_date` | Date of this run |
+| `access_key` | Unique key: `WorkspaceId|PrincipalId|Role` |
+
+### Setup
+
+#### Step 1 — Create the service principal
+
+The notebook needs a service principal to call the Microsoft Graph API from Fabric Spark (the built-in token provider does not support Graph). Run the included setup script:
+
+```powershell
+# Requires: az CLI installed, logged in as Global Admin or Privileged Role Admin
+.\setup-service-principal.ps1
+```
+
+The script will:
+- Create an app registration named `FabricWorkspaceAccessReport`
+- Create a service principal for it
+- Generate a client secret (valid 1 year)
+- Grant `GroupMember.Read.All` with admin consent (needed to read group members)
+- Print the three values you need for the next step
+
+Output looks like:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Setup complete! Add these to WorkspaceAccessReport.ipynb:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  SP_CLIENT_ID     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  SP_CLIENT_SECRET = "your-generated-secret"
+  SP_TENANT_ID     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+⚠️  Store the client secret securely. It expires in 1 year.
+```
+
+#### Step 2 — Upload the notebook to Fabric
+
+1. Go to your Fabric workspace
+2. Click **New → Import notebook**
+3. Upload `WorkspaceAccessReport.ipynb`
+
+#### Step 3 — Attach a lakehouse
+
+1. Open the notebook in Fabric
+2. Click **Add lakehouse** (left panel)
+3. Select or create a lakehouse — this is where the Delta table will be stored
+
+#### Step 4 — Fill in the service principal credentials
+
+At the top of the first code cell, paste the values from Step 1:
+
 ```python
-# After initial setup, query historical data:
+SP_CLIENT_ID     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+SP_CLIENT_SECRET = "your-generated-secret"
+SP_TENANT_ID     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
 
-# Show all active access
+> 💡 For production use, pass these as Fabric Pipeline parameters or retrieve the secret from Azure Key Vault:
+> ```python
+> SP_CLIENT_SECRET = notebookutils.credentials.getSecretWithLS("your-kv-name", "sp-client-secret")
+> ```
+
+#### Step 5 — Run and schedule
+
+Run all cells manually first to verify everything works and create the initial baseline.
+
+To run it daily:
+1. Create a **Fabric Data Pipeline**
+2. Add a **Notebook activity** pointing to `WorkspaceAccessReport`
+3. Set a **schedule trigger** (e.g. daily at 06:00)
+
+---
+
+## Querying the history
+
+Once the notebook has run a few times you can query the Delta table directly in Fabric:
+
+```python
+# Everyone with access right now
 spark.sql("""
-    SELECT WorkspaceName, PrincipalName, Role, granted_on_dt
+    SELECT WorkspaceName, PrincipalDisplayName, Role, GroupName, granted_on_dt
     FROM workspace_access_report
-    WHERE is_active = true
+    WHERE revoked_on_dt IS NULL
     ORDER BY WorkspaceName, Role
 """).show()
 
-# Show recently granted access (last 7 days)
+# Access granted in the last 7 days
 spark.sql("""
-    SELECT WorkspaceName, PrincipalName, Role, granted_on_dt
+    SELECT WorkspaceName, PrincipalDisplayName, Role, granted_on_dt
     FROM workspace_access_report
     WHERE granted_on_dt >= current_date() - 7
     ORDER BY granted_on_dt DESC
 """).show()
 
-# Show recently revoked access
+# Access revoked in the last 30 days
 spark.sql("""
-    SELECT WorkspaceName, PrincipalName, Role, granted_on_dt, revoked_on_dt
+    SELECT WorkspaceName, PrincipalDisplayName, Role, granted_on_dt, revoked_on_dt
     FROM workspace_access_report
-    WHERE is_active = false
-      AND revoked_on_dt >= current_date() - 7
+    WHERE revoked_on_dt >= current_date() - 30
     ORDER BY revoked_on_dt DESC
 """).show()
 ```
 
-## How It Works
-
-### Change Detection Logic
-
-The notebook compares today's snapshot against historical active records:
-
-1. **New Access** - In current snapshot, NOT in historical active records
-   - Sets `granted_on_dt = today`
-   - Sets `is_active = true`
-
-2. **Continuing Access** - In BOTH current snapshot AND historical active records
-   - Preserves original `granted_on_dt`
-   - Keeps `is_active = true`
-
-3. **Removed Access** - In historical active records, NOT in current snapshot
-   - Preserves original `granted_on_dt`
-   - Sets `revoked_on_dt = today`
-   - Sets `is_active = false`
-
-All records are appended to the Delta table, preserving complete audit history.
-
-## Security Group Expansion
-
-Both tools automatically expand Azure AD/Entra security groups to individual user members via Microsoft Graph API:
-
-- When a workspace has a security group assigned as Admin/Member/Contributor/Viewer
-- The tool queries Graph API for all members of that group
-- Each member appears as an individual record with:
-  - `FromGroupExpansion = true`
-  - `SourceGroupId` = parent group GUID
-  - `SourceGroupName` = parent group display name
-
-This ensures you see **exactly who** has access, not just which groups are assigned.
-
-## Output Examples
-
-### PowerShell Output (Console):
-```
-WorkspaceName: DataEngineering
-├─ Admin
-│  ├─ john.doe@contoso.com (Direct)
-│  └─ jane.smith@contoso.com (via Group: Data Engineering Admins)
-├─ Member
-│  └─ alice.jones@contoso.com (Direct)
-└─ Viewer
-   └─ bob.wilson@contoso.com (via Group: Data Readers)
-```
-
-### Notebook Output (Delta Table Sample):
-```
-+------------------+------------------+-----------+--------------------+
-| WorkspaceName    | PrincipalName    | Role      | granted_on_dt      |
-+------------------+------------------+-----------+--------------------+
-| DataEngineering  | john.doe@...     | Admin     | 2026-05-01         |
-| DataEngineering  | jane.smith@...   | Admin     | 2026-05-15         |
-| DataEngineering  | alice.jones@...  | Member    | 2026-05-01         |
-+------------------+------------------+-----------+--------------------+
-```
-
-## Permissions Required
-
-### Fabric API
-- Read access to all workspaces you want to monitor
-- Authenticated via `az login` (PowerShell) or `notebookutils.credentials.getToken("pbi")` (Notebook)
-
-### Microsoft Graph API
-- `GroupMember.Read.All` (Application permission, admin consent required)
-- Required for security group member expansion
-- Authenticated via `az login` (PowerShell) or service principal / MSAL (Notebook)
-
 ---
 
-## Service Principal Setup (Notebook)
+## Required permissions
 
-> **Why?** Microsoft Fabric's `mssparkutils.credentials.getToken` does not support the Graph API audience. The notebook uses MSAL with a service principal instead.
-
-### Automated setup (recommended)
-
-Run the included script — it handles everything in one go:
-
-```powershell
-# Prerequisites: az CLI installed, logged in as Global Admin or Privileged Role Admin
-.\setup-service-principal.ps1
-```
-
-The script will:
-1. Create an app registration named `FabricWorkspaceAccessReport`
-2. Create a service principal
-3. Create a client secret (valid 1 year)
-4. Grant `GroupMember.Read.All` with admin consent
-5. Print the three values to paste into the notebook
-
-### Configure the Notebook
-
-Set the three variables at the top of the first code cell using the output from the script:
-
-```python
-SP_CLIENT_ID     = "<your-app-client-id>"
-SP_CLIENT_SECRET = "<your-client-secret>"   # store securely — do not commit!
-SP_TENANT_ID     = "<your-tenant-id>"
-```
-
-**Recommended:** inject these at runtime via Fabric Pipeline parameters instead of hardcoding:
-
-```python
-SP_CLIENT_ID     = notebookutils.widgets.get("sp_client_id")
-SP_CLIENT_SECRET = notebookutils.widgets.get("sp_client_secret")
-SP_TENANT_ID     = notebookutils.widgets.get("sp_tenant_id")
-```
-
-Or retrieve them from **Azure Key Vault** using a Fabric linked service:
-
-```python
-SP_CLIENT_SECRET = notebookutils.credentials.getSecretWithLS("your-kv-name", "sp-client-secret")
-```
-
-### Required Permissions Summary
-
-| Permission | Type | Why needed |
+| What | Where | Permission needed |
 |---|---|---|
-| `GroupMember.Read.All` | Application | Read members of Entra security groups |
+| Read workspaces and roles | Fabric API | At least Viewer on each workspace (or Fabric Admin for all) |
+| Expand group members | Microsoft Graph | `GroupMember.Read.All` (granted by `setup-service-principal.ps1`) |
 
-## Troubleshooting
-
-**Q: "Empty results" or "No workspaces found"**  
-A: Verify your authentication has Fabric workspace read access. Try `az account show` to confirm correct tenant.
-
-**Q: "Group expansion failed"**  
-A: Check Graph API permissions. You need `Group.Read.All` or `GroupMember.Read.All`.
-
-**Q: "Notebook shows empty when opened in portal"**  
-A: If uploading via REST API, ensure you're using proper Fabric notebook format with cell markers.
-
-**Q: "Delta table not found"**  
-A: Ensure lakehouse is attached to notebook before first run. The table is created on first execution.
-
-## Contributing
-
-Contributions welcome! Please:
-- Test changes against a non-production Fabric workspace
-- Update README if adding new features
-- Include sample output for new query patterns
+---
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues or questions:
-- Open a GitHub Issue
-- Include error messages and Fabric/PowerShell versions
-- Sanitize any sensitive workspace/user names from logs
-
----
-
-**Built with:** GitHub Copilot + Microsoft Fabric  
-**Last Updated:** May 28, 2026
+MIT
