@@ -1,6 +1,12 @@
 # Fabric Permissions Tracker
 
-Automated tracking of Microsoft Fabric workspace access permissions with historical change detection.
+Automated tracking of Microsoft Fabric workspace access permissions with expension off the groups, so you will know all the users!
+
+In Fabric you can see which users and groups have permissions to a workspace, but how do you know who is in a certain group?
+Run this powershell script and you will know! It will create a HTML & CSV file with the same content to show you exactly this. Who has what privileges via which group.
+If you import the notebook, attach a lakehouse and run it every day, then you will see exactly the same, but you can also see when someone don't have access anymore and since when.
+
+
 
 ## Overview
 
